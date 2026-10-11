@@ -486,6 +486,39 @@ function tabPlan() {
 
 // ---------- barcode scanner ----------
 function openBarcodeScanner(onResult) {
+  // Fallback: foto maken via <input capture> en barcode detecteren uit de afbeelding.
+  // Werkt ook over HTTP (geen getUserMedia nodig).
+  function photoFallback(overlay, status) {
+    status.textContent = 'Maak een foto van de barcode';
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.capture = 'environment';
+    input.style.display = 'none';
+    overlay.appendChild(input);
+    input.addEventListener('change', async () => {
+      const file = input.files[0];
+      if (!file) return;
+      status.textContent = 'Barcode herkennen…';
+      try {
+        const bitmap = await createImageBitmap(file);
+        const det = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'] });
+        const results = await det.detect(bitmap);
+        overlay.remove();
+        if (results.length) {
+          onResult(results[0].rawValue);
+        } else {
+          status.textContent = 'Geen barcode gevonden. Probeer opnieuw.';
+          input.value = '';
+          input.click();
+        }
+      } catch (e) {
+        status.textContent = e.message || 'Fout bij herkennen.';
+      }
+    });
+    input.click();
+  }
+
   let stream = null;
   let detector = null;
   let rafId = null;
@@ -493,25 +526,21 @@ function openBarcodeScanner(onResult) {
 
   const status = h('p', { class: 'scanner-status' }, 'Camera starten…');
   const video = h('video', { autoplay: true, muted: true, playsinline: true });
-  const closeBtn = h('button', { type: 'button', class: 'ghost', style: 'color:#fff;border-color:rgba(255,255,255,0.3);', onclick: stop }, 'Annuleren');
+  const closeBtn = h('button', { type: 'button', class: 'ghost', style: 'color:#fff;border-color:rgba(255,255,255,0.3);', onclick: () => { stopped = true; if (rafId) cancelAnimationFrame(rafId); if (stream) stream.getTracks().forEach((t) => t.stop()); overlay.remove(); } }, 'Annuleren');
 
   const wrap = h('div', { class: 'scanner-wrap' }, video, h('div', { class: 'scanner-frame' }));
   const overlay = h('div', { class: 'scanner-overlay' }, wrap, status, closeBtn);
   document.body.appendChild(overlay);
-
-  function stop() {
-    stopped = true;
-    if (rafId) cancelAnimationFrame(rafId);
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    overlay.remove();
-  }
 
   async function tick() {
     if (stopped || video.readyState < 2) { rafId = requestAnimationFrame(tick); return; }
     try {
       const results = await detector.detect(video);
       if (results.length) {
-        stop();
+        stopped = true;
+        if (rafId) cancelAnimationFrame(rafId);
+        if (stream) stream.getTracks().forEach((t) => t.stop());
+        overlay.remove();
         onResult(results[0].rawValue);
         return;
       }
@@ -520,17 +549,25 @@ function openBarcodeScanner(onResult) {
   }
 
   (async () => {
+    if (!('BarcodeDetector' in window)) {
+      // Browser ondersteunt BarcodeDetector niet
+      wrap.style.display = 'none';
+      status.textContent = 'Camera-scanner niet beschikbaar in deze browser.';
+      return;
+    }
     try {
-      if (!('BarcodeDetector' in window)) throw new Error('Camera-scanner wordt niet ondersteund in deze browser. Voer de barcode handmatig in.');
       const supported = await BarcodeDetector.getSupportedFormats();
       const ean = supported.filter((f) => f.includes('ean') || f.includes('upc'));
       detector = new BarcodeDetector({ formats: ean.length ? ean : ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+      // Probeer live video (vereist HTTPS of localhost)
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } } });
       video.srcObject = stream;
       status.textContent = 'Richt op een barcode…';
       rafId = requestAnimationFrame(tick);
-    } catch (e) {
-      status.textContent = e.message || 'Camera niet beschikbaar.';
+    } catch (_) {
+      // getUserMedia mislukt (HTTP / geen toestemming) → foto-fallback
+      wrap.style.display = 'none';
+      photoFallback(overlay, status);
     }
   })();
 }
