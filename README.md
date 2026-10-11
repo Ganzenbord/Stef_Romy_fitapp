@@ -52,6 +52,7 @@ De app draait op je eigen computer en is via Tailscale (privénetwerk) ook onder
 2. `.env` met `OFF_CONTACT_EMAIL=<jouw adres>` en `NODE_ENV=production`, daarna `npm start`.
 3. In een tweede terminal: `tailscale serve --bg 3000`. Dat toont het https-adres (`https://<computer>.<tailnet>.ts.net`).
 4. Updaten: `git pull && npm install`, daarna de app herstarten.
+5. Wachtwoord vergeten: `npm run reset-password` (vraagt om het nieuwe wachtwoord, wist geen data).
 
 Zonder `NODE_ENV=production` werkt inloggen over `http://localhost`. Met `production` werkt het alleen via het https-adres.
 

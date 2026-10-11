@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/calc.test.js test/food.test.js test/e2e.test.js test/e2e-food.test.js"
+    "test": "node --test test/calc.test.js test/food.test.js test/e2e.test.js test/e2e-food.test.js",
+    "reset-password": "node scripts/reset-password.js"
   },
   "license": "UNLICENSED",
   "dependencies": {
