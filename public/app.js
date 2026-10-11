@@ -1026,4 +1026,33 @@ function render() {
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+// ── Thema-toggle ──────────────────────────────────────────────
+(function () {
+  // Pas opgeslagen thema toe (index.html doet dit ook vroeg via inline script)
+  const saved = (() => { try { return localStorage.getItem('fit-theme') || 'dark'; } catch (_) { return 'dark'; } })();
+  document.documentElement.setAttribute('data-theme', saved);
+
+  const btn = document.createElement('button');
+  btn.id = 'theme-toggle';
+  btn.setAttribute('aria-label', 'Wissel thema');
+
+  function refresh() {
+    const t = document.documentElement.getAttribute('data-theme') || 'dark';
+    btn.textContent = t === 'pink' ? '🌑' : '🌸';
+    btn.title = t === 'pink' ? 'Naar donker thema' : 'Naar roze thema';
+  }
+
+  btn.addEventListener('click', () => {
+    const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+    const next = cur === 'pink' ? 'dark' : 'pink';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('fit-theme', next); } catch (_) {}
+    refresh();
+  });
+
+  refresh();
+  document.body.appendChild(btn);
+})();
+
 load();
