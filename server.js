@@ -693,12 +693,37 @@ app.use((err, req, res, _next) => {
 if (require.main === module) {
   const port = Number(process.env.PORT) || 3000;
   const host = process.env.HOST || '127.0.0.1';
-  app.listen(port, host, () => {
+  const server = app.listen(port, host, () => {
     console.log(`Health app op http://${host}:${port}`);
     if (db.prepare('SELECT COUNT(*) c FROM households').get().c === 0) {
       console.log(`Eerste registratie: setup-sleutel = ${SETUP_KEY}`);
     }
   });
+
+  // Graceful shutdown: stop nieuwe verbindingen, checkpoint WAL, sluit db.
+  // Zo gaat er nooit data verloren bij server-herstart of Ctrl+C.
+  function gracefulShutdown(signal) {
+    console.log(`\n[${signal}] server afsluiten...`);
+    server.close(() => {
+      try {
+        db.pragma('wal_checkpoint(TRUNCATE)');
+        db.close();
+        console.log('Database veilig afgesloten.');
+      } catch (e) {
+        console.error('Fout bij afsluiten database:', e.message);
+      }
+      process.exit(0);
+    });
+    // Forceer afsluiten na 5 seconden als verbindingen niet sluiten
+    setTimeout(() => {
+      console.error('Geforceerd afsluiten na timeout.');
+      try { db.pragma('wal_checkpoint(TRUNCATE)'); db.close(); } catch (_) {}
+      process.exit(1);
+    }, 5000).unref();
+  }
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 }
 
 module.exports = { app, SETUP_KEY };
