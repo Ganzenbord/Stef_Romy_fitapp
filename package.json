@@ -1,0 +1,22 @@
+{
+  "name": "fit-health-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Persoonlijke gezondheidsapp voor twee personen: doelen, gewicht, taille en foto's",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/calc.test.js test/food.test.js test/e2e.test.js test/e2e-food.test.js"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.3",
+    "cookie-session": "^2.1.1",
+    "express": "^5.3.0",
+    "multer": "^2.4.0"
+  }
+}
