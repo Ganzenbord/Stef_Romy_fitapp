@@ -1,3 +1,13 @@
 node_modules/
 data/
 *.log
+# Nooit committen: geheimen en persoonlijke of gelicentieerde data
+.env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+*.secret
+*.csv
+*.xlsx
+*.zip
