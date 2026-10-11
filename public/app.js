@@ -486,92 +486,76 @@ function tabPlan() {
 
 // ---------- barcode scanner ----------
 function openBarcodeScanner(onResult) {
-  // ZXing (geladen via CDN in index.html) werkt op alle browsers incl. iOS Safari.
-  // Foto-fallback via <input capture> werkt ook over HTTP — geen getUserMedia nodig.
-
-  function decodeFromImage(file, status, overlay, retry) {
-    status.textContent = 'Barcode herkennen…';
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = async () => {
-      try {
-        const reader = new ZXingBrowser.BrowserMultiFormatReader();
-        const result = await reader.decodeFromImageUrl(url);
-        URL.revokeObjectURL(url);
-        overlay.remove();
-        onResult(result.getText());
-      } catch (_) {
-        URL.revokeObjectURL(url);
-        status.textContent = 'Geen barcode gevonden. Probeer opnieuw (houd de camera stil en zorg voor goed licht).';
-        retry();
-      }
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); status.textContent = 'Fout bij laden afbeelding.'; retry(); };
-    img.src = url;
-  }
-
-  function startPhotoMode(overlay, status) {
-    status.textContent = 'Tik op de knop om een foto te maken van de barcode';
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.capture = 'environment';
-    input.style.display = 'none';
-    overlay.appendChild(input);
-
-    const shootBtn = h('button', { type: 'button', style: 'background:var(--accent);color:var(--accent-ink);border:none;border-radius:12px;padding:12px 24px;font-size:1em;', onclick: () => { input.value = ''; input.click(); } }, '📷 Foto maken');
-    overlay.appendChild(shootBtn);
-
-    const retry = () => shootBtn.style.display = '';
-    input.addEventListener('change', () => {
-      const file = input.files[0];
-      if (!file) return;
-      shootBtn.style.display = 'none';
-      decodeFromImage(file, status, overlay, retry);
-    });
-  }
+  // Strategie:
+  // 1. HTTPS + BarcodeDetector beschikbaar → live video scanner
+  // 2. BarcodeDetector niet beschikbaar of video mislukt → foto via <input capture>
+  //    + BarcodeDetector op de foto (werkt ook op iOS 17.4+ en Android Chrome)
 
   const status = h('p', { class: 'scanner-status' }, 'Camera starten…');
   const video = h('video', { autoplay: true, muted: true, playsinline: true });
-  let codeReader = null;
-  let liveActive = false;
+  let stream = null;
+  let rafId = null;
+  let stopped = false;
 
-  const closeBtn = h('button', { type: 'button', class: 'ghost', style: 'color:#fff;border-color:rgba(255,255,255,0.3);', onclick: () => {
-    if (codeReader && liveActive) try { codeReader.reset(); } catch (_) {}
-    overlay.remove();
-  } }, 'Annuleren');
-
+  const closeBtn = h('button', { type: 'button', class: 'ghost', style: 'color:#fff;border-color:rgba(255,255,255,0.3);', onclick: stop }, 'Annuleren');
   const wrap = h('div', { class: 'scanner-wrap' }, video, h('div', { class: 'scanner-frame' }));
   const overlay = h('div', { class: 'scanner-overlay' }, wrap, status, closeBtn);
   document.body.appendChild(overlay);
 
-  (async () => {
-    // Probeer live video via ZXing (vereist HTTPS of localhost)
-    if (typeof ZXingBrowser === 'undefined') {
-      wrap.style.display = 'none';
-      status.textContent = 'Scanner laadt nog. Probeer het opnieuw.';
+  function stop() {
+    stopped = true;
+    if (rafId) cancelAnimationFrame(rafId);
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    overlay.remove();
+  }
+
+  function photoFallback() {
+    wrap.style.display = 'none';
+    if (!('BarcodeDetector' in window)) {
+      status.textContent = 'Barcode-scanner niet beschikbaar in deze browser. Voer de barcode handmatig in.';
       return;
     }
+    status.textContent = 'Maak een foto van de barcode';
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*'; input.capture = 'environment';
+    input.style.display = 'none';
+    overlay.appendChild(input);
+    const btn = h('button', { type: 'button', style: 'background:var(--accent);color:var(--accent-ink);border:none;border-radius:12px;padding:12px 24px;font-size:1em;', onclick: () => { input.value = ''; input.click(); } }, '📷 Foto maken');
+    overlay.appendChild(btn);
+    input.addEventListener('change', async () => {
+      const file = input.files[0]; if (!file) return;
+      btn.style.display = 'none'; status.textContent = 'Barcode herkennen…';
+      try {
+        const det = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'] });
+        const bitmap = await createImageBitmap(file);
+        const results = await det.detect(bitmap);
+        if (results.length) { stop(); onResult(results[0].rawValue); }
+        else { status.textContent = 'Geen barcode gevonden. Probeer opnieuw.'; btn.style.display = ''; }
+      } catch (e) { status.textContent = e.message || 'Fout bij herkennen.'; btn.style.display = ''; }
+    });
+  }
+
+  async function tick(det) {
+    if (stopped || video.readyState < 2) { rafId = requestAnimationFrame(() => tick(det)); return; }
     try {
-      const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
-      if (!devices.length) throw new Error('no camera');
-      // Kies achtercamera
-      const back = devices.find((d) => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
-      codeReader = new ZXingBrowser.BrowserMultiFormatReader();
-      liveActive = true;
+      const results = await det.detect(video);
+      if (results.length) { stop(); onResult(results[0].rawValue); return; }
+    } catch (_) {}
+    rafId = requestAnimationFrame(() => tick(det));
+  }
+
+  (async () => {
+    if (!('BarcodeDetector' in window)) { photoFallback(); return; }
+    try {
+      const supported = await BarcodeDetector.getSupportedFormats();
+      const fmt = supported.filter((f) => /ean|upc/.test(f));
+      const det = new BarcodeDetector({ formats: fmt.length ? fmt : ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+      video.srcObject = stream;
       status.textContent = 'Richt op een barcode…';
-      codeReader.decodeFromVideoDevice(back.deviceId, video, (result, err) => {
-        if (result) {
-          liveActive = false;
-          try { codeReader.reset(); } catch (_) {}
-          overlay.remove();
-          onResult(result.getText());
-        }
-      });
+      rafId = requestAnimationFrame(() => tick(det));
     } catch (_) {
-      // Live mislukt (HTTP / geen toestemming / geen camera) → foto-modus
-      wrap.style.display = 'none';
-      startPhotoMode(overlay, status);
+      photoFallback();
     }
   })();
 }
