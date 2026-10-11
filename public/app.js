@@ -484,6 +484,57 @@ function tabPlan() {
     logout);
 }
 
+// ---------- barcode scanner ----------
+function openBarcodeScanner(onResult) {
+  let stream = null;
+  let detector = null;
+  let rafId = null;
+  let stopped = false;
+
+  const status = h('p', { class: 'scanner-status' }, 'Camera starten…');
+  const video = h('video', { autoplay: true, muted: true, playsinline: true });
+  const closeBtn = h('button', { type: 'button', class: 'ghost', style: 'color:#fff;border-color:rgba(255,255,255,0.3);', onclick: stop }, 'Annuleren');
+
+  const wrap = h('div', { class: 'scanner-wrap' }, video, h('div', { class: 'scanner-frame' }));
+  const overlay = h('div', { class: 'scanner-overlay' }, wrap, status, closeBtn);
+  document.body.appendChild(overlay);
+
+  function stop() {
+    stopped = true;
+    if (rafId) cancelAnimationFrame(rafId);
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    overlay.remove();
+  }
+
+  async function tick() {
+    if (stopped || video.readyState < 2) { rafId = requestAnimationFrame(tick); return; }
+    try {
+      const results = await detector.detect(video);
+      if (results.length) {
+        stop();
+        onResult(results[0].rawValue);
+        return;
+      }
+    } catch (_) {}
+    rafId = requestAnimationFrame(tick);
+  }
+
+  (async () => {
+    try {
+      if (!('BarcodeDetector' in window)) throw new Error('Camera-scanner wordt niet ondersteund in deze browser. Voer de barcode handmatig in.');
+      const supported = await BarcodeDetector.getSupportedFormats();
+      const ean = supported.filter((f) => f.includes('ean') || f.includes('upc'));
+      detector = new BarcodeDetector({ formats: ean.length ? ean : ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } } });
+      video.srcObject = stream;
+      status.textContent = 'Richt op een barcode…';
+      rafId = requestAnimationFrame(tick);
+    } catch (e) {
+      status.textContent = e.message || 'Camera niet beschikbaar.';
+    }
+  })();
+}
+
 // ---------- eten ----------
 const MEALS = [['breakfast', 'Ontbijt'], ['lunch', 'Lunch'], ['dinner', 'Diner'], ['snack', 'Tussendoor']];
 const MEAL_MAP = Object.fromEntries(MEALS);
@@ -675,10 +726,17 @@ function pickView(a, mealLabel, close) {
       if (term.length < 2) { a.msg = 'Typ eerst minstens 2 letters in het zoekveld.'; paint(); return; }
       online(async () => ({ results: (await api('POST', '/api/off/search', { q: term })).results }));
     } }, 'Zoek online (Open Food Facts)'),
-    h('div', { class: 'row' }, barcode, h('button', { type: 'button', class: 'ghost small', onclick: () => {
-      const code = barcode.value.trim();
-      online(async () => { const r = await api('POST', '/api/off/barcode', { barcode: code }); return { results: r.result ? [r.result] : [] }; });
-    } }, 'Opzoeken')),
+    h('div', { class: 'row' }, barcode,
+      h('button', { type: 'button', class: 'ghost small', onclick: () => {
+        openBarcodeScanner((code) => {
+          barcode.value = code;
+          online(async () => { const r = await api('POST', '/api/off/barcode', { barcode: code }); return { results: r.result ? [r.result] : [] }; });
+        });
+      } }, '📷'),
+      h('button', { type: 'button', class: 'ghost small', onclick: () => {
+        const code = barcode.value.trim();
+        online(async () => { const r = await api('POST', '/api/off/barcode', { barcode: code }); return { results: r.result ? [r.result] : [] }; });
+      } }, 'Opzoeken')),
     onlineBox,
     h('button', { type: 'button', onclick: () => { a.mode = 'new'; a.msg = ''; render(); } }, 'Nieuw eigen product'));
   paint();

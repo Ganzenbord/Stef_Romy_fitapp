@@ -198,6 +198,29 @@ button:disabled { opacity: 0.45; transform: none; }
 .viewer img { max-width: 100%; max-height: 78vh; border-radius: 14px; }
 .viewer .row { margin-top: 12px; width: 100%; max-width: 360px; }
 
+/* barcode scanner overlay */
+.scanner-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.92);
+  z-index: 30; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px; padding: 16px;
+}
+.scanner-overlay video {
+  width: 100%; max-width: 380px; border-radius: 16px;
+  aspect-ratio: 1/1; object-fit: cover; background: #000;
+}
+.scanner-frame {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
+}
+.scanner-frame::after {
+  content: ''; width: 65%; aspect-ratio: 1/1;
+  border: 3px solid var(--accent); border-radius: 16px;
+  box-shadow: 0 0 0 1000px rgba(0,0,0,0.45);
+}
+.scanner-wrap { position: relative; width: 100%; max-width: 380px; }
+.scanner-status {
+  color: #fff; font-size: 0.9em; text-align: center; min-height: 1.4em;
+}
+
 /* ── Utilities ────────────────────────────────────────────── */
 .hidden { display: none; }
 .between { align-items: center; justify-content: space-between; }
