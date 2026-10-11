@@ -1,0 +1,12 @@
+
+/* v0.3: voedingsschema */
+.schema-day { margin-bottom: 0.5rem; }
+.schema-today { border-left: 3px solid var(--accent, #2563eb); }
+.schema-slot { padding: 0.25rem 0; border-bottom: 1px solid var(--border, #e5e7eb); }
+.schema-slot:last-child { border-bottom: none; }
+.schema-meal-label { font-size: 0.75rem; color: var(--muted, #6b7280); margin-bottom: 0.15rem; }
+.schema-dish { text-align: left; font-size: 0.9rem; padding: 0.2rem 0; }
+.schema-add { font-size: 0.8rem; opacity: 0.6; }
+
+/* v0.3: sport */
+.tabs button { font-size: 0.75rem; } /* meer knoppen, iets kleiner */

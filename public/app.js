@@ -2,7 +2,13 @@
 // Fit: persoonlijke gezondheidsapp voor twee personen. Alle UI wordt met DOM-calls opgebouwd (geen innerHTML met gebruikersdata).
 
 const root = document.getElementById('app');
-const state = { summary: null, tab: 'progress', authMode: 'login', photos: [], editProfile: false, viewer: null, pday: { st: 'idle', d: null }, food: { date: null, day: null, dayState: 'idle', add: null, msg: '' } };
+const state = {
+  summary: null, tab: 'progress', authMode: 'login', photos: [], editProfile: false, viewer: null,
+  pday: { st: 'idle', d: null },
+  food: { date: null, day: null, dayState: 'idle', add: null, msg: '' },
+  sport: { date: null, workouts: null, state: 'idle', adding: false, recent: null, recentState: 'idle' },
+  schema: { week: null, entries: null, state: 'idle', editing: null },
+};
 
 // ---------- helpers ----------
 function h(tag, attrs, ...kids) {
@@ -30,6 +36,19 @@ const parseNum = (s) => {
   return t === '' ? null : Number(t);
 };
 const dateNL = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' });
+const addDaysToIso = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+
+// Berekent de maandag van de week voor een datum
+function isoWeekStart(iso) {
+  const d = new Date(iso + 'T00:00:00Z');
+  const day = d.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
+const DAY_LABELS = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+const DAY_LABELS_FULL = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
 
 async function api(method, url, body, isForm) {
   const opts = { method, credentials: 'same-origin', headers: { 'X-Requested-With': 'health-app' } };
@@ -174,8 +193,8 @@ function renderProfileForm(onboarding) {
     h('div', { class: 'row' }, field('Lengte (cm)', height), onboarding ? field('Gewicht nu (kg)', weight) : null, field('Streef (kg)', goal)),
     field('Activiteit', act),
     field('Tempo', rate),
-    field('Niet eten (optioneel, met komma’s)', avoid),
-    h('p', { class: 'hint' }, 'Wat je niet eet gebruik ik later bij weekmenu’s. De app weigert streefgewichten met een BMI onder 18,5 en eet-doelen onder je BMR. Dat is bewust.'),
+    field('Niet eten (optioneel, met komma's)', avoid),
+    h('p', { class: 'hint' }, 'Wat je niet eet gebruik ik bij weekmenu's. De app weigert streefgewichten met een BMI onder 18,5 en eet-doelen onder je BMR. Dat is bewust.'),
     btn,
     !onboarding && h('button', { type: 'button', class: 'ghost', onclick: () => { state.editProfile = false; render(); } }, 'Annuleren'),
     err);
@@ -190,12 +209,19 @@ function renderApp() {
   if (!s.profile) return renderProfileForm(true);
   if (state.editProfile) return renderProfileForm(false);
 
-  const tabs = [['progress', 'Voortgang'], ['food', 'Eten'], ['plan', 'Plan']];
-  const body = state.food.add ? addView() : { progress: tabProgress, food: tabFood, plan: tabPlan }[state.tab]();
+  const tabs = [['progress', 'Voortgang'], ['food', 'Eten'], ['sport', 'Sport'], ['schema', 'Schema'], ['plan', 'Plan']];
+  let body;
+  if (state.food.add) {
+    body = addView();
+  } else {
+    const tabFns = { progress: tabProgress, food: tabFood, sport: tabSport, schema: tabSchema, plan: tabPlan };
+    body = (tabFns[state.tab] || tabProgress)();
+  }
   root.replaceChildren(
     body,
     h('nav', { class: 'tabs', 'aria-label': 'Hoofdmenu' },
-      tabs.map(([k, l]) => h('button', { type: 'button', 'aria-current': state.tab === k && !state.food.add ? 'page' : null, onclick: () => { state.tab = k; state.food.add = null; render(); } }, l)))
+      tabs.map(([k, l]) => h('button', { type: 'button', 'aria-current': state.tab === k && !state.food.add ? 'page' : null,
+        onclick: () => { state.tab = k; state.food.add = null; render(); } }, l)))
   );
   if (state.viewer) root.append(viewer());
 }
@@ -239,7 +265,6 @@ function recentCard() {
       h('button', { type: 'button', class: 'danger small', 'aria-label': 'Verwijder ' + e.date, onclick: async () => { if (confirm('Meting van ' + dateNL(e.date) + ' verwijderen?')) { try { await api('DELETE', '/api/entries/' + e.date); } catch (_) {} await load(); } } }, 'Wis')))));
 }
 
-// Eten van vandaag, met snelle toevoeg-knoppen, op de Voortgang-pagina
 async function loadPday() {
   const p = state.pday;
   p.st = 'loading';
@@ -383,14 +408,14 @@ function photosCard() {
     h('img', { src: '/api/photos/' + p.id, alt: 'Foto van ' + p.date, loading: 'lazy', onclick: () => { state.viewer = p; render(); } }),
     h('figcaption', {}, dateNL(p.date)))));
   if (!state.photosLoaded) loadPhotos();
-  return h('div', { class: 'card' }, h('h3', {}, 'Foto’s'),
-    h('p', { class: 'hint' }, 'Alleen jij ziet je foto’s. Maak ze steeds in hetzelfde licht, dezelfde houding en op dezelfde afstand, bijvoorbeeld elke 2 weken.'),
-    state.photos.length ? grid : h('p', { class: 'meta' }, 'Nog geen foto’s.'),
+  return h('div', { class: 'card' }, h('h3', {}, 'Foto's'),
+    h('p', { class: 'hint' }, 'Alleen jij ziet je foto's. Maak ze steeds in hetzelfde licht, dezelfde houding en op dezelfde afstand, bijvoorbeeld elke 2 weken.'),
+    state.photos.length ? grid : h('p', { class: 'meta' }, 'Nog geen foto's.'),
     h('button', { type: 'button', class: 'ghost', onclick: () => input.click() }, 'Foto toevoegen'), input, err);
 }
 
 async function loadPhotos() {
-  state.photosLoaded = true; // vlag vooraf, anders blijft een mislukte call render-loops veroorzaken
+  state.photosLoaded = true;
   try {
     state.photos = (await api('GET', '/api/photos')).photos;
   } catch (_) {}
@@ -431,7 +456,16 @@ function tabPlan() {
       h('p', { class: 'hint' }, `Onderhoud ≈ ${fmt(pl.maintenanceKcal, 0)} kcal · BMR ≈ ${fmt(pl.bmr, 0)} kcal · BMI ${fmt(pl.bmi)} → ${fmt(pl.goalBmi)}. Dit zijn schattingen (Mifflin-St Jeor); je lichaam wijkt af. Stuur bij op het 7-daags gemiddelde, niet op één dag. Niet bedoeld als medisch advies.`));
 
   const hh = s.household;
-  const logout = h('button', { type: 'button', class: 'ghost', onclick: async () => { await api('POST', '/api/logout'); state.summary = null; state.photosLoaded = false; state.photos = []; state.tab = 'progress'; state.pday = { st: 'idle', d: null }; state.food = { date: null, day: null, dayState: 'idle', add: null, msg: '' }; render(); } }, 'Uitloggen');
+  const logout = h('button', { type: 'button', class: 'ghost', onclick: async () => {
+    await api('POST', '/api/logout');
+    state.summary = null; state.photosLoaded = false; state.photos = []; state.tab = 'progress';
+    state.pday = { st: 'idle', d: null };
+    state.food = { date: null, day: null, dayState: 'idle', add: null, msg: '' };
+    state.sport = { date: null, workouts: null, state: 'idle', adding: false, recent: null, recentState: 'idle' };
+    state.schema = { week: null, entries: null, state: 'idle', editing: null };
+    render();
+  } }, 'Uitloggen');
+
   return h('div', {}, h('h1', {}, 'Plan'), planCard,
     h('div', { class: 'card' }, h('h3', {}, 'Profiel'),
       h('p', {}, `${fmt(s.profile.heightCm, 0)} cm · streef ${fmt(s.profile.goalKg)} kg · ${ACTIVITY_LABELS[s.profile.activity]}`),
@@ -445,7 +479,8 @@ function tabPlan() {
 
 // ---------- eten ----------
 const MEALS = [['breakfast', 'Ontbijt'], ['lunch', 'Lunch'], ['dinner', 'Diner'], ['snack', 'Tussendoor']];
-const addDays = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+const MEAL_MAP = Object.fromEntries(MEALS);
+const addDays = (iso, n) => addDaysToIso(iso, n);
 const scaleP = (p, g) => ({
   kcal: Math.round((p.kcal * g) / 100),
   protein: Math.round((p.protein * g) / 10) / 10,
@@ -599,7 +634,6 @@ function pickView(a, mealLabel, close) {
         : a.foods.length ? h('ul', { class: 'list' }, a.foods.map((fd) => row(fd.name, fd.brand, fmt(fd.kcal100, 0) + ' kcal/100 g', () => selectFood(a, fd))))
         : h('p', { class: 'meta' }, a.q ? 'Niets gevonden. Zoek online of maak een eigen product.' : 'Nog geen producten. Zoek online of maak een eigen product.'));
     const o = a.online;
-    // let op: replaceChildren(null) zou de tekst "null" plaatsen, dus lege waarden eerst eruit filteren
     onlineBox.replaceChildren(...[
       o && o.busy ? h('p', { class: 'meta' }, 'Zoeken…') : null,
       o && o.results ? h('div', { class: 'card' },
@@ -723,6 +757,266 @@ function amountView(a, mealLabel, close) {
     err);
   return h('div', {}, h('h1', {}, sel.name), h('p', { class: 'sub' }, mealLabel + (edit ? ' (aanpassen)' : '')),
     (sel.warnings || []).map((w) => h('div', { class: 'notice' }, w)), form);
+}
+
+// ---------- sport ----------
+const INTENSITY_LABELS = { light: 'Licht', moderate: 'Matig', hard: 'Zwaar' };
+
+async function loadWorkouts(date) {
+  const sp = state.sport;
+  sp.date = date;
+  sp.state = 'loading';
+  sp.workouts = null;
+  try {
+    const r = await api('GET', '/api/workouts?date=' + date);
+    sp.workouts = r.workouts;
+    sp.state = 'ok';
+  } catch (_) {
+    sp.state = 'error';
+  }
+  render();
+}
+
+async function loadRecentWorkouts() {
+  const sp = state.sport;
+  sp.recentState = 'loading';
+  try {
+    const r = await api('GET', '/api/workouts/recent?days=30');
+    sp.recent = r.workouts;
+    sp.recentState = 'ok';
+  } catch (_) {
+    sp.recentState = 'error';
+  }
+  render();
+}
+
+function tabSport() {
+  const s = state.summary;
+  const sp = state.sport;
+  const today = s.today;
+
+  if (!sp.date || sp.date !== today) {
+    loadWorkouts(today);
+    if (sp.recentState === 'idle') loadRecentWorkouts();
+    return h('div', {}, h('h1', {}, 'Sport'), h('p', { class: 'meta' }, 'Laden…'));
+  }
+
+  if (sp.state === 'error') return h('div', {}, h('h1', {}, 'Sport'), h('button', { type: 'button', class: 'ghost', onclick: () => loadWorkouts(today) }, 'Opnieuw proberen'));
+
+  const todayCard = workoutDayCard(today, sp.workouts || []);
+
+  // Recente trainingen (laatste 30 dagen, gegroepeerd per dag)
+  let recentCard = null;
+  if (sp.recentState === 'ok' && sp.recent && sp.recent.length) {
+    const byDate = {};
+    sp.recent.forEach((w) => {
+      if (!byDate[w.date]) byDate[w.date] = [];
+      byDate[w.date].push(w);
+    });
+    const dateKeys = Object.keys(byDate).filter((d) => d !== today).sort().reverse().slice(0, 14);
+    recentCard = dateKeys.length ? h('div', { class: 'card' }, h('h3', {}, 'Afgelopen trainingen'),
+      h('ul', { class: 'list' }, dateKeys.map((d) => {
+        const ws = byDate[d];
+        const totalMin = ws.reduce((a, w) => a + (w.durationMin || 0), 0);
+        const totalKcal = ws.reduce((a, w) => a + (w.kcalBurned || 0), 0);
+        return h('li', {},
+          h('div', {}, h('strong', {}, dateNL(d)),
+            h('div', { class: 'meta' }, ws.map((w) => w.type + (w.durationMin ? ' ' + w.durationMin + ' min' : '')).join(' · '))),
+          h('div', { class: 'meta' }, [totalMin ? totalMin + ' min' : null, totalKcal ? '~' + totalKcal + ' kcal' : null].filter(Boolean).join(' · ')));
+      }))) : null;
+  }
+
+  return h('div', {}, h('h1', {}, 'Sport'), todayCard, recentCard,
+    sp.recentState === 'loading' && h('p', { class: 'meta' }, 'Laden…'));
+}
+
+function workoutDayCard(date, workouts) {
+  const sp = state.sport;
+  const err = errBox();
+
+  const workoutList = workouts.length ? h('ul', { class: 'list' }, workouts.map((w) => {
+    const parts = [w.type];
+    if (w.durationMin) parts.push(w.durationMin + ' min');
+    if (w.intensity) parts.push(INTENSITY_LABELS[w.intensity] || w.intensity);
+    if (w.kcalBurned) parts.push('~' + w.kcalBurned + ' kcal');
+    return h('li', {},
+      h('div', {}, h('strong', {}, w.type), h('div', { class: 'meta' }, parts.slice(1).join(' · ')),
+        w.notes && h('div', { class: 'meta' }, w.notes)),
+      h('button', { type: 'button', class: 'danger small', 'aria-label': 'Verwijder training', onclick: async () => {
+        try { await api('DELETE', '/api/workouts/' + w.id); } catch (e) { showErr(err, e); return; }
+        await loadWorkouts(date);
+        if (sp.recentState === 'ok') loadRecentWorkouts();
+      } }, 'Wis'));
+  })) : h('p', { class: 'meta' }, 'Nog geen training vandaag.');
+
+  // Formulier voor nieuwe workout
+  if (!sp.adding) {
+    return h('div', { class: 'card' },
+      h('h2', {}, 'Training van ' + (date === state.summary.today ? 'vandaag' : dateNL(date))),
+      workoutList,
+      err,
+      h('button', { type: 'button', class: 'ghost', onclick: () => { sp.adding = true; render(); } }, '+ Training toevoegen'));
+  }
+
+  const typeIn = h('input', { type: 'text', placeholder: 'bijv. hardlopen, fietsen, zwemmen', maxlength: '60', autocomplete: 'off' });
+  const durIn = h('input', { type: 'text', inputmode: 'numeric', placeholder: 'min', 'aria-label': 'Duur in minuten' });
+  const intensityIn = h('select', {},
+    h('option', { value: '' }, 'Niet opgeven'),
+    h('option', { value: 'light' }, 'Licht'),
+    h('option', { value: 'moderate' }, 'Matig'),
+    h('option', { value: 'hard' }, 'Zwaar'));
+  const kcalIn = h('input', { type: 'text', inputmode: 'numeric', placeholder: 'kcal (optioneel)', 'aria-label': 'Verbrande calorieën' });
+  const notesIn = h('input', { type: 'text', placeholder: 'Notitie (optioneel)', maxlength: '200' });
+  const btn = h('button', { type: 'submit' }, 'Opslaan');
+
+  const form = h('form', { class: 'card', onsubmit: async (e) => {
+    e.preventDefault();
+    err.textContent = '';
+    btn.disabled = true;
+    try {
+      await api('POST', '/api/workouts', {
+        date,
+        type: typeIn.value.trim(),
+        durationMin: parseNum(durIn.value),
+        intensity: intensityIn.value || null,
+        kcalBurned: parseNum(kcalIn.value),
+        notes: notesIn.value.trim() || null,
+      });
+      sp.adding = false;
+      await loadWorkouts(date);
+      if (sp.recentState === 'ok') loadRecentWorkouts();
+    } catch (e2) {
+      showErr(err, e2);
+      btn.disabled = false;
+    }
+  } },
+    h('h2', {}, 'Training van ' + (date === state.summary.today ? 'vandaag' : dateNL(date))),
+    workoutList,
+    h('h3', {}, 'Nieuwe training'),
+    field('Sport / activiteit', typeIn),
+    h('div', { class: 'row' }, field('Duur (min)', durIn), field('Intensiteit', intensityIn)),
+    h('div', { class: 'row' }, field('Verbrande kcal', kcalIn), field('Notitie', notesIn)),
+    btn,
+    h('button', { type: 'button', class: 'ghost', onclick: () => { sp.adding = false; render(); } }, 'Annuleren'),
+    err);
+
+  return form;
+}
+
+// ---------- voedingsschema ----------
+async function loadSchema(weekRef) {
+  const sc = state.schema;
+  sc.state = 'loading';
+  try {
+    const r = await api('GET', '/api/meal-plan?week=' + weekRef);
+    sc.week = r.weekStart;
+    sc.entries = r.entries;
+    sc.state = 'ok';
+  } catch (_) {
+    sc.state = 'error';
+  }
+  render();
+}
+
+function tabSchema() {
+  const s = state.summary;
+  const sc = state.schema;
+
+  if (!sc.week) {
+    loadSchema(s.today);
+    return h('div', {}, h('h1', {}, 'Schema'), h('p', { class: 'meta' }, 'Laden…'));
+  }
+  if (sc.state === 'loading') return h('div', {}, h('h1', {}, 'Schema'), h('p', { class: 'meta' }, 'Laden…'));
+  if (sc.state === 'error') return h('div', {}, h('h1', {}, 'Schema'), h('button', { type: 'button', class: 'ghost', onclick: () => loadSchema(sc.week || s.today) }, 'Opnieuw proberen'));
+
+  const thisWeek = isoWeekStart(s.today);
+  const isCurrentWeek = sc.week === thisWeek;
+  const prevWeekDate = addDaysToIso(sc.week, -7);
+  const nextWeekDate = addDaysToIso(sc.week, 7);
+
+  // Week navigatie
+  const weekLabel = (() => {
+    const end = addDaysToIso(sc.week, 6);
+    const from = new Date(sc.week + 'T00:00:00Z').toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+    const to = new Date(end + 'T00:00:00Z').toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+    return from + ' – ' + to;
+  })();
+
+  const nav = h('div', { class: 'row datenav' },
+    h('button', { type: 'button', class: 'ghost small', onclick: () => loadSchema(prevWeekDate) }, '‹'),
+    h('strong', { class: 'center' }, isCurrentWeek ? 'Deze week' : weekLabel),
+    h('button', { type: 'button', class: 'ghost small', onclick: () => loadSchema(nextWeekDate) }, '›'));
+
+  // Indexeer entries op day+meal
+  const entryMap = {};
+  (sc.entries || []).forEach((e) => { entryMap[e.day + ':' + e.meal] = e; });
+
+  const avoid = (s.profile && s.profile.avoid) ? s.profile.avoid.toLowerCase() : '';
+
+  const err = errBox();
+
+  // Schema editing
+  if (sc.editing) {
+    const ed = sc.editing;
+    const dishIn = h('input', { type: 'text', value: ed.dish || '', maxlength: '100', placeholder: 'bijv. Havermout met banaan', autocomplete: 'off' });
+    const notesIn = h('input', { type: 'text', value: ed.notes || '', maxlength: '200', placeholder: 'Notitie (optioneel)', autocomplete: 'off' });
+    const btn = h('button', { type: 'submit' }, 'Opslaan');
+    const form = h('form', { class: 'card', onsubmit: async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      btn.disabled = true;
+      try {
+        await api('PUT', '/api/meal-plan', { week: sc.week, day: ed.day, meal: ed.meal, dish: dishIn.value, notes: notesIn.value });
+        sc.editing = null;
+        await loadSchema(sc.week);
+      } catch (e2) {
+        showErr(err, e2);
+        btn.disabled = false;
+      }
+    } },
+      h('h3', {}, DAY_LABELS_FULL[ed.day] + ' — ' + MEAL_MAP[ed.meal]),
+      field('Gerecht', dishIn),
+      field('Notitie', notesIn),
+      avoid && h('p', { class: 'hint' }, 'Let op: niet eten: ' + avoid),
+      btn,
+      h('button', { type: 'button', class: 'ghost', onclick: () => { sc.editing = null; render(); } }, 'Annuleren'),
+      err);
+    return h('div', {}, h('h1', {}, 'Schema'), nav, form);
+  }
+
+  // Weekraster
+  const days = DAY_LABELS.map((label, dayIdx) => {
+    const dayDate = addDaysToIso(sc.week, dayIdx);
+    const isToday = dayDate === s.today;
+    const slots = MEALS.map(([mealKey, mealLabel]) => {
+      const entry = entryMap[dayIdx + ':' + mealKey];
+      return h('div', { class: 'schema-slot' },
+        h('div', { class: 'schema-meal-label' }, mealLabel),
+        entry
+          ? h('div', { class: 'row between' },
+              h('button', { type: 'button', class: 'rowbtn schema-dish', onclick: () => { sc.editing = { day: dayIdx, meal: mealKey, dish: entry.dish, notes: entry.notes }; render(); } },
+                entry.dish, entry.notes && h('div', { class: 'meta' }, entry.notes)),
+              h('button', { type: 'button', class: 'danger small', 'aria-label': 'Verwijder gerecht', onclick: async () => {
+                try { await api('DELETE', '/api/meal-plan/' + entry.id); } catch (e2) { showErr(err, e2); return; }
+                await loadSchema(sc.week);
+              } }, '×'))
+          : h('button', { type: 'button', class: 'ghost small schema-add', onclick: () => { sc.editing = { day: dayIdx, meal: mealKey, dish: '', notes: '' }; render(); } }, '+ Invullen'));
+    });
+    return h('div', { class: 'card schema-day' + (isToday ? ' schema-today' : '') },
+      h('h3', {}, label + (isToday ? ' (vandaag)' : ''), h('span', { class: 'meta' }, ' ' + new Date(dayDate + 'T00:00:00Z').toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }))),
+      slots);
+  });
+
+  const copyBtn = h('button', { type: 'button', class: 'ghost', onclick: async () => {
+    if (!confirm('Schema van vorige week kopiëren naar deze week? Bestaande items blijven staan.')) return;
+    try {
+      const r = await api('POST', '/api/meal-plan/copy', { toWeek: sc.week });
+      if (!r.copied) alert('Vorige week heeft geen schema.');
+      else await loadSchema(sc.week);
+    } catch (e2) { showErr(err, e2); }
+  } }, 'Kopieer vorige week');
+
+  return h('div', {}, h('h1', {}, 'Schema'), nav, err, days, copyBtn);
 }
 
 // ---------- render ----------

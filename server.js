@@ -45,6 +45,15 @@ const ageFrom = (birth) => {
 };
 const fail = (res, code, msg) => res.status(code).json({ error: msg });
 
+// Berekent de maandag van de week van een gegeven datum (YYYY-MM-DD)
+const weekStart = (dateStr) => {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const day = d.getUTCDay(); // 0=Sunday, 1=Monday...
+  const diff = (day === 0 ? -6 : 1 - day); // verschil naar maandag
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
+};
+
 // ---------- middleware ----------
 app.use((req, res, next) => {
   res.set({
@@ -545,6 +554,128 @@ app.post('/api/log/copy', requireAuth, (req, res) => {
   if (existing + rows.length > MAX_LOG_PER_DAY) return fail(res, 400, 'Te veel regels voor één dag.');
   const ins = db.prepare('INSERT INTO log (user_id, date, meal, food_id, name, grams, kcal100, protein100, carbs100, fat100) VALUES (?,?,?,?,?,?,?,?,?,?)');
   db.transaction(() => rows.forEach((r) => ins.run(req.user.id, toDate, r.meal, r.food_id, r.name, r.grams, r.kcal100, r.protein100, r.carbs100, r.fat100)))();
+  res.json({ ok: true, copied: rows.length });
+});
+
+// ---------- v0.3: sport tracker ----------
+const INTENSITIES = ['light', 'moderate', 'hard'];
+const workoutOut = (w) => ({
+  id: w.id,
+  date: w.date,
+  type: w.type,
+  durationMin: w.duration_min,
+  intensity: w.intensity,
+  notes: w.notes,
+  kcalBurned: w.kcal_burned,
+});
+
+app.get('/api/workouts', requireAuth, (req, res) => {
+  const date = req.query.date || todayNL();
+  if (!isDate(date)) return fail(res, 400, 'Ongeldige datum.');
+  const rows = db.prepare('SELECT * FROM workouts WHERE user_id = ? AND date = ? ORDER BY id').all(req.user.id, date);
+  res.json({ workouts: rows.map(workoutOut) });
+});
+
+// Recente workouts (laatste N dagen, voor historieoverzicht)
+app.get('/api/workouts/recent', requireAuth, (req, res) => {
+  const days = Math.min(Math.max(1, Number(req.query.days) || 30), 90);
+  const since = new Date(todayNL() + 'T00:00:00Z');
+  since.setUTCDate(since.getUTCDate() - days + 1);
+  const sinceStr = since.toISOString().slice(0, 10);
+  const rows = db.prepare('SELECT * FROM workouts WHERE user_id = ? AND date >= ? ORDER BY date DESC, id DESC').all(req.user.id, sinceStr);
+  res.json({ workouts: rows.map(workoutOut) });
+});
+
+app.post('/api/workouts', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const date = isDate(b.date) ? b.date : todayNL();
+  if (Date.parse(date + 'T00:00:00Z') > new Date(todayNL() + 'T00:00:00Z').getTime() + 86400000) return fail(res, 400, 'Datum ligt in de toekomst.');
+  const type = String(b.type || '').trim().slice(0, 60);
+  if (!type) return fail(res, 400, 'Geef een type sport op.');
+  const durationMin = b.durationMin !== undefined ? num(b.durationMin) : null;
+  if (durationMin !== null && !(durationMin >= 1 && durationMin <= 600)) return fail(res, 400, 'Duur moet tussen 1 en 600 minuten liggen.');
+  const intensity = b.intensity || null;
+  if (intensity !== null && !INTENSITIES.includes(intensity)) return fail(res, 400, 'Ongeldige intensiteit.');
+  const notes = b.notes ? String(b.notes).trim().slice(0, 200) : null;
+  const kcalBurned = b.kcalBurned !== undefined ? num(b.kcalBurned) : null;
+  if (kcalBurned !== null && !(kcalBurned >= 0 && kcalBurned <= 5000)) return fail(res, 400, 'Verbrande calorieën moet tussen 0 en 5000 liggen.');
+
+  const r = db
+    .prepare('INSERT INTO workouts (user_id, date, type, duration_min, intensity, notes, kcal_burned) VALUES (?,?,?,?,?,?,?)')
+    .run(req.user.id, date, type, durationMin, intensity, notes, kcalBurned);
+  res.json({ ok: true, id: Number(r.lastInsertRowid) });
+});
+
+app.delete('/api/workouts/:id', requireAuth, (req, res) => {
+  const r = db.prepare('DELETE FROM workouts WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.user.id);
+  if (!r.changes) return fail(res, 404, 'Niet gevonden.');
+  res.json({ ok: true });
+});
+
+// ---------- v0.3: voedingsschema ----------
+const MEAL_LABELS = { breakfast: 'Ontbijt', lunch: 'Lunch', dinner: 'Diner', snack: 'Tussendoor' };
+const planEntryOut = (e) => ({
+  id: e.id,
+  weekStart: e.week_start,
+  day: e.day,
+  meal: e.meal,
+  dish: e.dish,
+  notes: e.notes,
+});
+
+app.get('/api/meal-plan', requireAuth, (req, res) => {
+  // week=YYYY-MM-DD (een datum in de gewenste week) of niets voor de huidige week
+  const ref = isDate(req.query.week) ? req.query.week : todayNL();
+  const ws = weekStart(ref);
+  const rows = db.prepare('SELECT * FROM meal_plans WHERE household_id = ? AND week_start = ? ORDER BY day, meal').all(req.user.household_id, ws);
+  res.json({ weekStart: ws, entries: rows.map(planEntryOut) });
+});
+
+app.put('/api/meal-plan', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const ref = isDate(b.week) ? b.week : todayNL();
+  const ws = weekStart(ref);
+  const day = Number(b.day);
+  if (!Number.isInteger(day) || day < 0 || day > 6) return fail(res, 400, 'Dag moet 0 (ma) t/m 6 (zo) zijn.');
+  const meal = b.meal;
+  if (!food.MEALS.includes(meal)) return fail(res, 400, 'Ongeldige maaltijd.');
+  const dish = String(b.dish || '').trim().slice(0, 100);
+  if (!dish) return fail(res, 400, 'Geef een gerecht op.');
+  const notes = b.notes ? String(b.notes).trim().slice(0, 200) : null;
+
+  db.prepare(
+    `INSERT INTO meal_plans (household_id, week_start, day, meal, dish, notes)
+     VALUES (?,?,?,?,?,?)
+     ON CONFLICT(household_id, week_start, day, meal) DO UPDATE SET dish=excluded.dish, notes=excluded.notes`
+  ).run(req.user.household_id, ws, day, meal, dish, notes);
+  res.json({ ok: true });
+});
+
+app.delete('/api/meal-plan/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM meal_plans WHERE id = ? AND household_id = ?').get(Number(req.params.id), req.user.household_id);
+  if (!row) return fail(res, 404, 'Niet gevonden.');
+  db.prepare('DELETE FROM meal_plans WHERE id = ?').run(row.id);
+  res.json({ ok: true });
+});
+
+// Kopieer schema van vorige week naar de huidige week
+app.post('/api/meal-plan/copy', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const toRef = isDate(b.toWeek) ? b.toWeek : todayNL();
+  const toWs = weekStart(toRef);
+  // Vorige week = 7 dagen terug
+  const prevDate = new Date(toWs + 'T00:00:00Z');
+  prevDate.setUTCDate(prevDate.getUTCDate() - 7);
+  const fromWs = prevDate.toISOString().slice(0, 10);
+
+  const rows = db.prepare('SELECT * FROM meal_plans WHERE household_id = ? AND week_start = ?').all(req.user.household_id, fromWs);
+  if (!rows.length) return res.json({ ok: true, copied: 0 });
+
+  const ins = db.prepare(
+    `INSERT OR IGNORE INTO meal_plans (household_id, week_start, day, meal, dish, notes)
+     VALUES (?,?,?,?,?,?)`
+  );
+  db.transaction(() => rows.forEach((r) => ins.run(req.user.household_id, toWs, r.day, r.meal, r.dish, r.notes)))();
   res.json({ ok: true, copied: rows.length });
 });
 
