@@ -305,7 +305,7 @@ app.get('/api/summary', requireAuth, (req, res) => {
   }
 
   res.json({
-    user: { id: uid, name: req.user.name },
+    user: { id: uid, name: req.user.name, email: req.user.email },
     household: { inviteCode: household.invite_code, members },
     profile: profileOut(profileRow),
     plan,

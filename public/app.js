@@ -471,9 +471,16 @@ function tabPlan() {
       h('p', {}, `${fmt(s.profile.heightCm, 0)} cm · streef ${fmt(s.profile.goalKg)} kg · ${ACTIVITY_LABELS[s.profile.activity]}`),
       s.profile.avoid && h('p', { class: 'meta' }, 'Niet eten: ' + s.profile.avoid),
       h('button', { type: 'button', class: 'ghost', onclick: () => { state.editProfile = true; render(); } }, 'Profiel aanpassen')),
+    h('div', { class: 'card' }, h('h3', {}, 'Account'),
+      h('p', {}, h('strong', {}, s.user.name), h('br', {}), h('span', { class: 'meta' }, s.user.email))),
     h('div', { class: 'card' }, h('h3', {}, 'Huishouden'),
       h('p', {}, hh.members.join(' & ')),
-      hh.members.length < 2 && h('p', { class: 'hint' }, 'Uitnodigingscode voor je partner: ', h('strong', {}, hh.inviteCode))),
+      h('p', { class: 'hint' }, 'Uitnodigingscode', hh.members.length < 2 ? ' (deel met je partner)' : '', ': ',
+        h('strong', {}, hh.inviteCode),
+        h('button', {
+          type: 'button', class: 'ghost', style: 'margin-left:8px;padding:2px 10px;font-size:0.85em;',
+          onclick: () => { try { navigator.clipboard.writeText(hh.inviteCode); } catch (_) {} }
+        }, 'Kopieer'))),
     logout);
 }
 
