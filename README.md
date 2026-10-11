@@ -40,6 +40,24 @@ Eerste registratie: "Eerste keer? Maak het huishouden aan" en vul de setup-sleut
 
 ## Op een VPS
 
+### Snelle installatie (Debian/Ubuntu)
+
+Voorwaarde: een domein (A-record) dat naar de VPS wijst. Lees het script eerst, het draait als root.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ganzenbord/Stef_Romy_fitapp/main/deploy/deploy.sh -o deploy.sh
+less deploy.sh
+sudo bash deploy.sh install fit.jouwdomein.nl jouw@email.nl
+```
+
+Het script installeert Node 22 (als dat nog niet kan), zet de app in `/opt/fit` met een eigen gebruiker en een afgeschermde systemd-service, maakt `/etc/fit.env` (met een willekeurige setup-sleutel), en zet een dagelijkse back-up op (`/var/backups/fit`, 14 dagen). Als poort 80 of 443 al door een andere webserver wordt gebruikt, raakt het script die niet aan en print het een nginx-voorbeeld. Anders installeert het Caddy met automatisch HTTPS. Updaten: `sudo bash /opt/fit/deploy/deploy.sh update`.
+
+De back-ups staan op dezelfde schijf als de app. Kopieer ze ook naar een andere plek, anders helpt een kapotte schijf niet.
+
+Dit script is getest op syntax, de invoercontrole en de back-upopdracht (op een WAL-database), maar nog niet op een echte VPS.
+
+### Handmatig
+
 Draai de app achter een reverse proxy met HTTPS. Voorbeeld met Caddy:
 
 ```
