@@ -692,13 +692,32 @@ app.use((err, req, res, _next) => {
 
 if (require.main === module) {
   const port = Number(process.env.PORT) || 3000;
-  const host = process.env.HOST || '127.0.0.1';
-  const server = app.listen(port, host, () => {
-    console.log(`Health app op http://${host}:${port}`);
+  const host = process.env.HOST || '0.0.0.0';
+
+  function onListening(proto, h, p) {
+    console.log(`Health app op ${proto}://${h}:${p}`);
     if (db.prepare('SELECT COUNT(*) c FROM households').get().c === 0) {
       console.log(`Eerste registratie: setup-sleutel = ${SETUP_KEY}`);
     }
-  });
+  }
+
+  let server;
+  const certFile = process.env.HTTPS_CERT;
+  const keyFile  = process.env.HTTPS_KEY;
+  if (certFile && keyFile && fs.existsSync(certFile) && fs.existsSync(keyFile)) {
+    const https = require('https');
+    const creds = { cert: fs.readFileSync(certFile), key: fs.readFileSync(keyFile) };
+    server = https.createServer(creds, app).listen(port, host, () => onListening('https', host, port));
+    // HTTP → HTTPS redirect op poort 80
+    const http = require('http');
+    http.createServer((req, res) => {
+      const loc = `https://${req.headers.host.replace(/:\d+$/, '')}${port !== 443 ? ':' + port : ''}${req.url}`;
+      res.writeHead(301, { Location: loc });
+      res.end();
+    }).listen(80, host, () => console.log('HTTP → HTTPS redirect actief op :80'));
+  } else {
+    server = app.listen(port, host, () => onListening('http', host, port));
+  }
 
   // Graceful shutdown: stop nieuwe verbindingen, checkpoint WAL, sluit db.
   // Zo gaat er nooit data verloren bij server-herstart of Ctrl+C.
