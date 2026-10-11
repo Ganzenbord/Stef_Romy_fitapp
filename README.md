@@ -1,6 +1,6 @@
 # Fit
 
-Persoonlijke gezondheidsapp voor twee personen (mobiel-first PWA). Versie 0.1.
+Persoonlijke gezondheidsapp voor twee personen (mobiel-first PWA).
 
 ## Wat zit erin
 
@@ -11,6 +11,10 @@ Persoonlijke gezondheidsapp voor twee personen (mobiel-first PWA). Versie 0.1.
 - Voeding loggen (v0.2): producten per 100 g (gedeeld in het huishouden), logboek per persoon, vier maaltijden, dagtotalen tegen het dagdoel, "kopieer gisteren", vaak gebruikte producten bovenaan. Een logregel bewaart een momentopname, dus een product later aanpassen herschrijft de geschiedenis niet.
 - Per persoon een "Niet eten"-lijst (vrije tekst). Die wordt in v0.3 bij weekmenu's gebruikt; nu alleen opgeslagen en getoond.
 - Veiligheidsgrenzen: weigert streefgewicht met BMI < 18,5, dagdoel nooit onder BMR (en nooit onder 1500 man / 1200 vrouw), tekort max. 25%, tempo max. 1% lichaamsgewicht per week, waarschuwing als je sneller afvalt
+
+## Indeling
+
+Drie tabs: **Voortgang** (startpagina: gewicht en taille invoeren, voortgang, eten van vandaag met snelle toevoegknoppen, grafiek, foto's), **Eten** (dagoverzicht, andere dagen, gisteren kopiëren) en **Plan** (dagdoel, profiel, huishouden).
 
 ## Nog niet gebouwd
 
@@ -28,6 +32,8 @@ Eerste registratie: "Eerste keer? Maak het huishouden aan" en vul de setup-sleut
 
 ## Omgevingsvariabelen
 
+Je kunt ze ook in een bestand `.env` naast `server.js` zetten (`cp .env.example .env`). Dat bestand staat in `.gitignore`. Gewone omgevingsvariabelen winnen van `.env`.
+
 | Variabele | Betekenis |
 |---|---|
 | `PORT` | poort (standaard 3000) |
@@ -37,6 +43,17 @@ Eerste registratie: "Eerste keer? Maak het huishouden aan" en vul de setup-sleut
 | `SESSION_SECRET` | sessiesleutel (standaard automatisch gegenereerd in `DATA_DIR/session.secret`) |
 | `OFF_CONTACT_EMAIL` | jouw e-mailadres voor de User-Agent richting Open Food Facts. Zonder deze variabele staat online zoeken uit (503). |
 | `NODE_ENV=production` | zet de sessiecookie op `Secure`, dus alleen via HTTPS gebruiken |
+
+## Thuis draaien met Tailscale (geen server nodig)
+
+De app draait op je eigen computer en is via Tailscale (privénetwerk) ook onderweg bereikbaar, met HTTPS. Voorwaarde: die computer staat aan en slaapt niet.
+
+1. Tailscale op de computer en op de telefoons, zelfde account (of deel de computer met je partner). In het Tailscale-dashboard bij DNS: MagicDNS en HTTPS Certificates aan.
+2. `.env` met `OFF_CONTACT_EMAIL=<jouw adres>` en `NODE_ENV=production`, daarna `npm start`.
+3. In een tweede terminal: `tailscale serve --bg 3000`. Dat toont het https-adres (`https://<computer>.<tailnet>.ts.net`).
+4. Updaten: `git pull && npm install`, daarna de app herstarten.
+
+Zonder `NODE_ENV=production` werkt inloggen over `http://localhost`. Met `production` werkt het alleen via het https-adres.
 
 ## Op een VPS
 

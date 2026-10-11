@@ -7,6 +7,9 @@ const bcrypt = require('bcryptjs');
 const cookieSession = require('cookie-session');
 const multer = require('multer');
 
+// Optioneel .env naast server.js (staat in .gitignore). Bestaande omgevingsvariabelen winnen.
+try { process.loadEnvFile(path.join(__dirname, '.env')); } catch (_) { /* geen .env, of oudere Node: dan werken gewone omgevingsvariabelen */ }
+
 const { db, DATA_DIR } = require('./lib/db');
 const calc = require('./lib/calc');
 const food = require('./lib/food');

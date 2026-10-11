@@ -2,7 +2,7 @@
 // Fit: persoonlijke gezondheidsapp voor twee personen. Alle UI wordt met DOM-calls opgebouwd (geen innerHTML met gebruikersdata).
 
 const root = document.getElementById('app');
-const state = { summary: null, tab: 'today', authMode: 'login', photos: [], editProfile: false, viewer: null, food: { date: null, day: null, dayState: 'idle', add: null, msg: '' } };
+const state = { summary: null, tab: 'progress', authMode: 'login', photos: [], editProfile: false, viewer: null, pday: { st: 'idle', d: null }, food: { date: null, day: null, dayState: 'idle', add: null, msg: '' } };
 
 // ---------- helpers ----------
 function h(tag, attrs, ...kids) {
@@ -190,24 +190,24 @@ function renderApp() {
   if (!s.profile) return renderProfileForm(true);
   if (state.editProfile) return renderProfileForm(false);
 
-  const tabs = [['today', 'Vandaag'], ['food', 'Eten'], ['progress', 'Voortgang'], ['photos', 'Foto’s'], ['plan', 'Plan']];
-  const body = { today: tabToday, food: tabFood, progress: tabProgress, photos: tabPhotos, plan: tabPlan }[state.tab]();
+  const tabs = [['progress', 'Voortgang'], ['food', 'Eten'], ['plan', 'Plan']];
+  const body = state.food.add ? addView() : { progress: tabProgress, food: tabFood, plan: tabPlan }[state.tab]();
   root.replaceChildren(
     body,
     h('nav', { class: 'tabs', 'aria-label': 'Hoofdmenu' },
-      tabs.map(([k, l]) => h('button', { type: 'button', 'aria-current': state.tab === k ? 'page' : null, onclick: () => { state.tab = k; render(); } }, l)))
+      tabs.map(([k, l]) => h('button', { type: 'button', 'aria-current': state.tab === k && !state.food.add ? 'page' : null, onclick: () => { state.tab = k; state.food.add = null; render(); } }, l)))
   );
   if (state.viewer) root.append(viewer());
 }
 
-function tabToday() {
+function measureCard() {
   const s = state.summary;
   const todayEntry = s.entries.find((e) => e.date === s.today) || {};
   const err = errBox();
-  const w = h('input', { type: 'text', inputmode: 'decimal', value: todayEntry.weightKg ?? '', placeholder: 'kg' });
-  const t = h('input', { type: 'text', inputmode: 'decimal', value: todayEntry.waistCm ?? '', placeholder: 'cm' });
+  const w = h('input', { type: 'text', inputmode: 'decimal', value: todayEntry.weightKg ?? '', placeholder: 'kg', 'aria-label': 'Gewicht in kg' });
+  const t = h('input', { type: 'text', inputmode: 'decimal', value: todayEntry.waistCm ?? '', placeholder: 'cm', 'aria-label': 'Taille in cm' });
   const btn = h('button', { type: 'submit' }, 'Opslaan');
-  const form = h('form', {
+  return h('form', {
     class: 'card',
     onsubmit: async (e) => {
       e.preventDefault();
@@ -218,25 +218,63 @@ function tabToday() {
         await load();
       } catch (e2) {
         showErr(err, e2);
-      } finally {
         btn.disabled = false;
       }
     },
   },
-    h('h2', {}, dateNL(s.today)),
+    h('h2', {}, 'Meting van ' + dateNL(s.today)),
     h('div', { class: 'row' }, field('Gewicht (kg)', w), field('Taille (cm)', t)),
     btn,
     h('p', { class: 'hint' }, 'Weeg elke ochtend na het toilet, voor het eten. Eén dag zegt niets; het 7-daags gemiddelde telt. Taille: 1x per week, op dezelfde plek (navelhoogte).'),
     err);
+}
 
+function recentCard() {
+  const s = state.summary;
   const recent = [...s.entries].reverse().slice(0, 7);
-  const list = h('div', { class: 'card' }, h('h3', {}, 'Laatste metingen'),
-    recent.length
-      ? h('ul', { class: 'list' }, recent.map((e) => h('li', {},
-          h('div', {}, h('strong', {}, dateNL(e.date)), h('div', { class: 'meta' }, [e.weightKg !== null ? fmt(e.weightKg) + ' kg' : null, e.waistCm !== null ? 'taille ' + fmt(e.waistCm) + ' cm' : null].filter(Boolean).join(' · '))),
-          h('button', { type: 'button', class: 'danger small', 'aria-label': 'Verwijder ' + e.date, onclick: async () => { if (confirm('Meting van ' + dateNL(e.date) + ' verwijderen?')) { await api('DELETE', '/api/entries/' + e.date); await load(); } } }, 'Wis'))))
-      : h('p', { class: 'meta' }, 'Nog geen metingen. Vul hierboven je eerste in.'));
-  return h('div', {}, h('h1', {}, 'Vandaag'), form, list);
+  if (!recent.length) return null;
+  return h('div', { class: 'card' }, h('h3', {}, 'Laatste metingen'),
+    h('ul', { class: 'list' }, recent.map((e) => h('li', {},
+      h('div', {}, h('strong', {}, dateNL(e.date)), h('div', { class: 'meta' }, [e.weightKg !== null ? fmt(e.weightKg) + ' kg' : null, e.waistCm !== null ? 'taille ' + fmt(e.waistCm) + ' cm' : null].filter(Boolean).join(' · '))),
+      h('button', { type: 'button', class: 'danger small', 'aria-label': 'Verwijder ' + e.date, onclick: async () => { if (confirm('Meting van ' + dateNL(e.date) + ' verwijderen?')) { try { await api('DELETE', '/api/entries/' + e.date); } catch (_) {} await load(); } } }, 'Wis')))));
+}
+
+// Eten van vandaag, met snelle toevoeg-knoppen, op de Voortgang-pagina
+async function loadPday() {
+  const p = state.pday;
+  p.st = 'loading';
+  try {
+    p.d = await api('GET', '/api/day?date=' + state.summary.today);
+    p.st = 'ok';
+  } catch (_) {
+    p.st = 'error';
+  }
+  render();
+}
+
+function foodTodayCard() {
+  const s = state.summary;
+  const p = state.pday;
+  if (p.st === 'idle') loadPday();
+  if (p.st !== 'ok') {
+    return h('div', { class: 'card' }, h('h3', {}, 'Eten vandaag'),
+      p.st === 'error' ? h('button', { type: 'button', class: 'ghost', onclick: () => { p.st = 'idle'; render(); } }, 'Opnieuw proberen') : h('p', { class: 'meta' }, 'Laden…'));
+  }
+  const t = p.d.totals;
+  const tg = p.d.target;
+  const bar = h('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': tg ? Math.min(100, Math.round((t.kcal / tg.kcal) * 100)) : 0 }, h('div', {}));
+  bar.firstChild.style.width = (tg ? Math.min(100, (t.kcal / tg.kcal) * 100) : 0) + '%';
+  const add = (key) => () => { state.food.date = s.today; state.food.dayState = 'idle'; openPick(key, 'progress'); };
+  return h('div', { class: 'card' }, h('h3', {}, 'Eten vandaag'),
+    h('div', { class: 'big' }, fmt(t.kcal, 0), h('small', {}, tg ? ` van ${fmt(tg.kcal, 0)} kcal` : ' kcal')),
+    tg && bar,
+    h('p', { class: 'hint' }, tg ? (t.kcal <= tg.kcal ? `Nog ${fmt(tg.kcal - t.kcal, 0)} kcal over.` : `${fmt(t.kcal - tg.kcal, 0)} kcal boven je dagdoel.`) : 'Vul je gewicht in voor een dagdoel.'),
+    h('div', { class: 'stats' },
+      stat(fmt(t.protein, 0) + (tg ? ` / ${tg.protein}` : '') + ' g', 'Eiwit'),
+      stat(fmt(t.carbs, 0) + (tg ? ` / ${tg.carbs}` : '') + ' g', 'Koolhydraten'),
+      stat(fmt(t.fat, 0) + (tg ? ` / ${tg.fat}` : '') + ' g', 'Vet')),
+    h('div', { class: 'quick' }, MEALS.map(([key, label]) => h('button', { type: 'button', class: 'ghost small', onclick: add(key) }, '+ ' + label))),
+    h('button', { type: 'button', class: 'ghost', onclick: () => { state.tab = 'food'; state.food.date = s.today; state.food.dayState = 'idle'; render(); } }, 'Dagoverzicht en gisteren kopiëren'));
 }
 
 function chart(entries, goalKg) {
@@ -273,7 +311,10 @@ function chart(entries, goalKg) {
 function tabProgress() {
   const s = state.summary;
   const pr = s.progress;
-  if (!pr) return h('div', {}, h('h1', {}, 'Voortgang'), h('div', { class: 'card' }, h('p', {}, 'Voer eerst je gewicht in bij Vandaag.')));
+  const head = [h('h1', {}, 'Voortgang'), measureCard()];
+  if (!pr) {
+    return h('div', {}, head, h('div', { class: 'card' }, h('p', {}, 'Vul hierboven je gewicht in, dan verschijnen je voortgang en dagdoel.')), foodTodayCard(), photosCard());
+  }
   const total = pr.startKg - s.profile.goalKg;
   const frac = total > 0 ? Math.min(1, Math.max(0, (pr.startKg - pr.currentAvgKg) / total)) : 0;
   const bar = h('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(frac * 100) }, h('div', {}));
@@ -288,7 +329,7 @@ function tabProgress() {
           h('div', { class: 'stat' }, h('div', { class: 'v' }, (waists.length > 1 ? (waists[waists.length - 1].waistCm - waists[0].waistCm > 0 ? '+' : '') + fmt(waists[waists.length - 1].waistCm - waists[0].waistCm) : '–') + ' cm'), h('div', { class: 'l' }, 'Sinds eerste meting'))))
     : null;
 
-  return h('div', {}, h('h1', {}, 'Voortgang'),
+  return h('div', {}, head,
     pr.note && h('div', { class: 'notice', role: 'status' }, pr.note),
     h('div', { class: 'card' },
       h('div', { class: 'stats' },
@@ -300,9 +341,12 @@ function tabProgress() {
       h('p', { class: 'hint' }, pr.actualKgPerWeek === null
         ? 'Het werkelijke tempo verschijnt na ongeveer een week metingen.'
         : `Werkelijk tempo (laatste 2 weken): ${fmt(pr.actualKgPerWeek, 2)} kg/week` + (planned !== null ? ` · plan: ${fmt(planned, 2)} kg/week` : ''))),
+    foodTodayCard(),
     h('div', { class: 'card' }, h('h3', {}, 'Gewicht'), chart(s.entries, s.profile.goalKg),
       h('div', { class: 'legend' }, h('span', {}, h('i', { class: 'a' }), '7-daags gemiddelde'), h('span', {}, h('i', { class: 'w' }), 'Dagwaarde'), h('span', {}, h('i', { class: 'g' }), 'Streef'))),
-    waistCard);
+    waistCard,
+    photosCard(),
+    recentCard());
 }
 
 // ---------- foto's ----------
@@ -320,7 +364,7 @@ async function resizeToJpeg(file, max = 1600) {
   }
 }
 
-function tabPhotos() {
+function photosCard() {
   const err = errBox();
   const input = h('input', { type: 'file', accept: 'image/*', class: 'hidden', onchange: async () => {
     const f = input.files[0];
@@ -339,10 +383,10 @@ function tabPhotos() {
     h('img', { src: '/api/photos/' + p.id, alt: 'Foto van ' + p.date, loading: 'lazy', onclick: () => { state.viewer = p; render(); } }),
     h('figcaption', {}, dateNL(p.date)))));
   if (!state.photosLoaded) loadPhotos();
-  return h('div', {}, h('h1', {}, 'Foto’s'),
-    h('p', { class: 'sub' }, 'Alleen jij ziet je foto’s. Maak ze steeds in hetzelfde licht, dezelfde houding en op dezelfde afstand, bijvoorbeeld elke 2 weken.'),
-    h('button', { type: 'button', onclick: () => input.click() }, 'Foto toevoegen'), input, err,
-    h('div', { class: 'card' }, state.photos.length ? grid : h('p', { class: 'meta' }, 'Nog geen foto’s.')));
+  return h('div', { class: 'card' }, h('h3', {}, 'Foto’s'),
+    h('p', { class: 'hint' }, 'Alleen jij ziet je foto’s. Maak ze steeds in hetzelfde licht, dezelfde houding en op dezelfde afstand, bijvoorbeeld elke 2 weken.'),
+    state.photos.length ? grid : h('p', { class: 'meta' }, 'Nog geen foto’s.'),
+    h('button', { type: 'button', class: 'ghost', onclick: () => input.click() }, 'Foto toevoegen'), input, err);
 }
 
 async function loadPhotos() {
@@ -372,7 +416,7 @@ function tabPlan() {
   const s = state.summary;
   const pl = s.plan;
   let planCard;
-  if (!pl) planCard = h('div', { class: 'card' }, h('p', {}, 'Voer eerst je gewicht in bij Vandaag, dan reken ik je dagdoel uit.'));
+  if (!pl) planCard = h('div', { class: 'card' }, h('p', {}, 'Voer eerst je gewicht in bij Voortgang, dan reken ik je dagdoel uit.'));
   else if (!pl.ok) planCard = h('div', { class: 'card' }, h('div', { class: 'notice' }, pl.errors.join(' ')));
   else
     planCard = h('div', { class: 'card' },
@@ -387,7 +431,7 @@ function tabPlan() {
       h('p', { class: 'hint' }, `Onderhoud ≈ ${fmt(pl.maintenanceKcal, 0)} kcal · BMR ≈ ${fmt(pl.bmr, 0)} kcal · BMI ${fmt(pl.bmi)} → ${fmt(pl.goalBmi)}. Dit zijn schattingen (Mifflin-St Jeor); je lichaam wijkt af. Stuur bij op het 7-daags gemiddelde, niet op één dag. Niet bedoeld als medisch advies.`));
 
   const hh = s.household;
-  const logout = h('button', { type: 'button', class: 'ghost', onclick: async () => { await api('POST', '/api/logout'); state.summary = null; state.photosLoaded = false; state.photos = []; state.tab = 'today'; state.food = { date: null, day: null, dayState: 'idle', add: null, msg: '' }; render(); } }, 'Uitloggen');
+  const logout = h('button', { type: 'button', class: 'ghost', onclick: async () => { await api('POST', '/api/logout'); state.summary = null; state.photosLoaded = false; state.photos = []; state.tab = 'progress'; state.pday = { st: 'idle', d: null }; state.food = { date: null, day: null, dayState: 'idle', add: null, msg: '' }; render(); } }, 'Uitloggen');
   return h('div', {}, h('h1', {}, 'Plan'), planCard,
     h('div', { class: 'card' }, h('h3', {}, 'Profiel'),
       h('p', {}, `${fmt(s.profile.heightCm, 0)} cm · streef ${fmt(s.profile.goalKg)} kg · ${ACTIVITY_LABELS[s.profile.activity]}`),
@@ -426,7 +470,7 @@ async function loadDay() {
   }
   render();
 }
-const reloadDay = () => { state.food.dayState = 'idle'; render(); };
+const reloadDay = () => { state.food.dayState = 'idle'; state.pday.st = 'idle'; render(); };
 const shiftDay = (n) => {
   const f = state.food;
   f.date = addDays(f.date, n);
@@ -463,7 +507,7 @@ function tabFood() {
   const totals = h('div', { class: 'card' },
     h('div', { class: 'big' }, fmt(t.kcal, 0), h('small', {}, tg ? ` van ${fmt(tg.kcal, 0)} kcal` : ' kcal')),
     tg && bar,
-    h('p', { class: 'hint' }, tg ? (t.kcal <= tg.kcal ? `Nog ${fmt(tg.kcal - t.kcal, 0)} kcal over vandaag.` : `${fmt(t.kcal - tg.kcal, 0)} kcal boven je dagdoel.`) : 'Vul je gewicht in bij Vandaag voor een dagdoel.'),
+    h('p', { class: 'hint' }, tg ? (t.kcal <= tg.kcal ? `Nog ${fmt(tg.kcal - t.kcal, 0)} kcal over vandaag.` : `${fmt(t.kcal - tg.kcal, 0)} kcal boven je dagdoel.`) : 'Vul je gewicht in bij Voortgang voor een dagdoel.'),
     h('div', { class: 'stats' },
       stat(fmt(t.protein, 0) + (tg ? ` / ${tg.protein}` : '') + ' g', 'Eiwit'),
       stat(fmt(t.carbs, 0) + (tg ? ` / ${tg.carbs}` : '') + ' g', 'Koolhydraten'),
@@ -496,8 +540,8 @@ function tabFood() {
   return h('div', {}, head, totals, meals);
 }
 
-function openPick(meal) {
-  const a = { meal, mode: 'pick', q: '', foods: null, online: null, msg: '', sel: null };
+function openPick(meal, from) {
+  const a = { meal, from: from || null, mode: 'pick', q: '', foods: null, online: null, msg: '', sel: null };
   state.food.add = a;
   render();
   loadFoods(a);
@@ -518,7 +562,7 @@ function addView() {
   const f = state.food;
   const a = f.add;
   const mealLabel = MEALS.find((m) => m[0] === a.meal)[1];
-  const close = () => { f.add = null; f.dayState = 'idle'; render(); };
+  const close = () => { f.add = null; f.dayState = 'idle'; state.pday.st = 'idle'; if (a.from) state.tab = a.from; render(); };
   if (a.mode === 'amount') return amountView(a, mealLabel, close);
   if (a.mode === 'new') return newFoodView(a, mealLabel);
   return pickView(a, mealLabel, close);

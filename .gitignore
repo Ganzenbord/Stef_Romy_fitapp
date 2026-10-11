@@ -11,3 +11,4 @@ data/
 *.csv
 *.xlsx
 *.zip
+!.env.example
