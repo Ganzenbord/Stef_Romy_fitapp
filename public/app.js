@@ -193,8 +193,8 @@ function renderProfileForm(onboarding) {
     h('div', { class: 'row' }, field('Lengte (cm)', height), onboarding ? field('Gewicht nu (kg)', weight) : null, field('Streef (kg)', goal)),
     field('Activiteit', act),
     field('Tempo', rate),
-    field('Niet eten (optioneel, met komma's)', avoid),
-    h('p', { class: 'hint' }, 'Wat je niet eet gebruik ik bij weekmenu's. De app weigert streefgewichten met een BMI onder 18,5 en eet-doelen onder je BMR. Dat is bewust.'),
+    field('Niet eten (optioneel, met kommas)', avoid),
+    h('p', { class: 'hint' }, 'Wat je niet eet gebruik ik bij weekmenus. De app weigert streefgewichten met een BMI onder 18,5 en eet-doelen onder je BMR. Dat is bewust.'),
     btn,
     !onboarding && h('button', { type: 'button', class: 'ghost', onclick: () => { state.editProfile = false; render(); } }, 'Annuleren'),
     err);
@@ -408,9 +408,9 @@ function photosCard() {
     h('img', { src: '/api/photos/' + p.id, alt: 'Foto van ' + p.date, loading: 'lazy', onclick: () => { state.viewer = p; render(); } }),
     h('figcaption', {}, dateNL(p.date)))));
   if (!state.photosLoaded) loadPhotos();
-  return h('div', { class: 'card' }, h('h3', {}, 'Foto's'),
-    h('p', { class: 'hint' }, 'Alleen jij ziet je foto's. Maak ze steeds in hetzelfde licht, dezelfde houding en op dezelfde afstand, bijvoorbeeld elke 2 weken.'),
-    state.photos.length ? grid : h('p', { class: 'meta' }, 'Nog geen foto's.'),
+  return h('div', { class: 'card' }, h('h3', {}, "Foto's"),
+    h('p', { class: 'hint' }, "Alleen jij ziet je foto's. Maak ze steeds in hetzelfde licht, dezelfde houding en op dezelfde afstand, bijvoorbeeld elke 2 weken."),
+    state.photos.length ? grid : h('p', { class: 'meta' }, "Nog geen foto's."),
     h('button', { type: 'button', class: 'ghost', onclick: () => input.click() }, 'Foto toevoegen'), input, err);
 }
 
